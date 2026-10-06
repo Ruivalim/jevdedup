@@ -1,0 +1,36 @@
+{
+  "name": "jevdedup",
+  "version": "0.1.0",
+  "description": "Duplicate file finder: classic size and hash checks, with Jev (TypeSafe AI) confirming and classifying each duplicate group.",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://git.ruivalim.com.br/ruivalim/jevdedup",
+  "repository": {
+    "type": "git",
+    "url": "https://git.ruivalim.com.br/ruivalim/jevdedup.git"
+  },
+  "bin": {
+    "jevdedup": "src/cli.ts"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test",
+    "test:live": "JEV_LIVE=1 bun test test/jev.live.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun test"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}
