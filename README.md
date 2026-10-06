@@ -33,7 +33,7 @@ Nada é deletado. O jevdedup só gera relatório.
 Requisitos: [Bun](https://bun.com) 1.1 ou mais novo.
 
 ```bash
-git clone https://git.ruivalim.com.br/ruivalim/jevdedup
+git clone https://github.com/Ruivalim/jevdedup.git
 cd jevdedup
 make setup                # bun install + cria .env a partir do exemplo
 # edite .env e coloque sua TYPESAFE_API_KEY
