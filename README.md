@@ -1,121 +1,122 @@
 # jevdedup
 
-> **Leia primeiro:** este é um projeto de exercício, criado para testar o Jev,
-> o modelo da [TypeSafe AI](https://typesafe.ai), e exercitar o SDK deles. Não é
-> um produto, não tem garantia de nada e parte do valor do repositório é
-> justamente observar onde o Jev acerta e onde ele erra. É um laboratório de um
-> uso específico de IA, não uma ferramenta de limpeza de disco confiável.
+> **Read this first:** this is an exercise project, created to test Jev, the
+> model from [TypeSafe AI](https://typesafe.ai), and to exercise their SDK. It
+> is not a product, it comes with no guarantees, and part of the value of the
+> repository is precisely watching where Jev gets things right and where it
+> gets them wrong. It is a laboratory for one specific use of AI, not a
+> trustworthy disk cleanup tool.
 
-CLI em [Bun](https://bun.com) que encontra arquivos duplicados numa pasta. As
-verificações padrão (tamanho, hash rápido, SHA-256 completo) fazem o trabalho
-pesado; o Jev entra depois, para conferir cada grupo, dar um veredito e sugerir
-qual cópia manter. O mesmo vale para pares suspeitos que os hashes não pegam:
-mesmo nome com conteúdo diferente, ou bytes quase idênticos.
+A CLI in [Bun](https://bun.com) that finds duplicate files in a folder. The
+standard checks (size, quick hash, full SHA-256) do the heavy lifting; Jev
+comes in afterwards, to check each group, give a verdict and suggest which copy
+to keep. The same goes for suspicious pairs the hashes miss: same name with
+different content, or nearly identical bytes.
 
-Nada é deletado. O jevdedup só gera relatório.
+Nothing is deleted. jevdedup only generates reports.
 
-## O que ele faz
+## What it does
 
-1. **Scan** recursivo da pasta (symlinks são ignorados, `.git` é pulado).
-2. **Agrupa por tamanho**: arquivos de tamanhos diferentes nunca são duplicatas.
-3. **Hash rápido**: primeiros e últimos 64 KB + tamanho, para descartar o óbvio.
-4. **SHA-256 completo** só nos sobreviventes: grupos com hash igual são
-   duplicatas exatas.
-5. **Jev confirma cada grupo**: são duplicatas de verdade? Algum arquivo está
-   rotulado errado (mesmo conteúdo com nomes e extensões que não batem)? Qual
-   cópia vale manter?
-6. **Pares semânticos**: mesmo nome de arquivo com bytes diferentes, ou bytes
-   quase idênticos com hash diferente, vão para o Jev decidir se são o mesmo
-   conteúdo com edições pequenas.
+1. **Scan** the folder recursively (symlinks are ignored, `.git` is skipped).
+2. **Group by size**: files of different sizes are never duplicates.
+3. **Quick hash**: first and last 64 KB plus size, to drop the obvious ones.
+4. **Full SHA-256** only on the survivors: groups with equal hashes are exact
+   duplicates.
+5. **Jev confirms each group**: are they really duplicates? Is any file
+   mislabeled (same content with names and extensions that do not match)? Which
+   copy is worth keeping?
+6. **Semantic pairs**: same file name with different bytes, or nearly identical
+   bytes with different hashes, go to Jev to decide whether they are the same
+   content with small edits.
 
-## Instalação
+## Installation
 
-Requisitos: [Bun](https://bun.com) 1.1 ou mais novo.
+Requirements: [Bun](https://bun.com) 1.1 or newer.
 
 ```bash
 git clone https://github.com/Ruivalim/jevdedup.git
 cd jevdedup
-make setup                # bun install + cria .env a partir do exemplo
-# edite .env e coloque sua TYPESAFE_API_KEY
-make install              # bun link: instala o comando `jevdedup`
+make setup                # bun install + creates .env from the example
+# edit .env and put your TYPESAFE_API_KEY there
+make install              # bun link: installs the `jevdedup` command
 ```
 
-Sem `bun link`, dá para rodar direto (`bun run src/cli.ts <pasta>`) ou compilar
-um binário standalone com `make build` (sai em `dist/jevdedup`).
+Without `bun link`, you can run it directly (`bun run src/cli.ts <folder>`) or
+build a standalone binary with `make build` (output goes to `dist/jevdedup`).
 
-## Uso
+## Usage
 
 ```bash
-jevdedup ~/Downloads                    # relatório com veredito do Jev
+jevdedup ~/Downloads                    # report with Jev's verdict
 jevdedup ~/Fotos --min-size 1MB --exclude "raw/**"
-jevdedup . --json > relatorio.json      # saída máquina
-jevdedup . --no-jev                     # offline, só o clássico
-jevdedup . --fail-on-duplicates         # exit code 2 se achar algo (CI)
+jevdedup . --json > report.json         # machine-readable output
+jevdedup . --no-jev                     # offline, classic checks only
+jevdedup . --fail-on-duplicates         # exit code 2 if anything is found (CI)
 ```
 
-### Opções
+### Options
 
-| Opção | O que faz |
+| Option | What it does |
 | --- | --- |
-| `--json` | relatório JSON em stdout (progresso continua em stderr) |
-| `--no-jev` | só verificações clássicas, nenhuma chamada de rede |
-| `--require-jev` | falha se não houver `TYPESAFE_API_KEY` em vez de degradar |
-| `--no-semantic` | não procura pares semânticos, só duplicatas exatas |
-| `--min-size <tamanho>` | ignora arquivos menores (`1KB`, `5MB`, ou bytes puros) |
-| `--exclude <glob>` | pula caminhos que batem com o glob (repetível) |
-| `--model <nome>` | modelo do Jev (padrão `jev-latest`) |
-| `--concurrency <n>` | paralelismo de hashing e de chamadas (padrão 8 e 4) |
-| `--max-jev-calls <n>` | orçamento de chamadas do Jev por execução (padrão 50) |
-| `--fail-on-duplicates` | exit code 2 quando encontra duplicatas |
+| `--json` | JSON report on stdout (progress stays on stderr) |
+| `--no-jev` | classic checks only, no network calls |
+| `--require-jev` | fails if `TYPESAFE_API_KEY` is missing instead of degrading |
+| `--no-semantic` | skips semantic pairs, exact duplicates only |
+| `--min-size <size>` | ignores smaller files (`1KB`, `5MB`, or plain bytes) |
+| `--exclude <glob>` | skips paths matching the glob (repeatable) |
+| `--model <name>` | the Jev model (default `jev-latest`) |
+| `--concurrency <n>` | parallelism for hashing and for calls (default 8 and 4) |
+| `--max-jev-calls <n>` | budget of Jev calls per run (default 50) |
+| `--fail-on-duplicates` | exit code 2 when duplicates are found |
 
-Códigos de saída: `0` tudo certo, `1` erro, `2` achou duplicatas com
+Exit codes: `0` all good, `1` error, `2` found duplicates with
 `--fail-on-duplicates`.
 
-## Onde o Jev entra
+## Where Jev comes in
 
-Cada grupo de duplicatas exatas vira uma chamada `systemOne` com os metadados e
-um trecho de texto dos arquivos (arquivos binários nunca são enviados, só os
-metadados). Três perguntas:
+Each group of exact duplicates becomes a `systemOne` call with the metadata and
+a text excerpt of the files (binary files are never sent, only their metadata).
+Three questions:
 
-- **verdict** (`choice`): `true_duplicate`, `mislabeled` ou `unsure`.
-- **safe_to_keep_one** (`noul`): manter uma cópia perde alguma informação?
-- **keep** (`choice`): qual caminho é a melhor cópia canônica.
+- **verdict** (`choice`): `true_duplicate`, `mislabeled` or `unsure`.
+- **safe_to_keep_one** (`noul`): does keeping one copy lose any information?
+- **keep** (`choice`): which path is the best canonical copy.
 
-Pares semânticos recebem duas perguntas: `same_content` (`noul`) e `relation`
-(`choice` entre edições pequenas, dupla exportação ou conteúdo diferente). O
-relatório mostra a resposta e os números crus (probabilidade, confiança, uso de
-tokens), porque o Jev é probabilístico e às vezes se contradiz: a decisão final
-é sua.
+Semantic pairs get two questions: `same_content` (`noul`) and `relation`
+(`choice` between small edits, double export or different content). The report
+shows the answer and the raw numbers (probability, confidence, token usage),
+because Jev is probabilistic and sometimes contradicts itself: the final
+decision is yours.
 
-## A chave da API
+## The API key
 
-O Jev é pago e requer chave. Pegue uma em
-[console.typesafe.ai/keys](https://console.typesafe.ai/keys) e coloque no `.env`
-(nunca commitado):
-
-```bash
-TYPESAFE_API_KEY=sua_chave_aqui
-```
-
-Sem chave, o jevdedup funciona igual, mas só com as verificações clássicas e um
-aviso.
-
-## Desenvolvimento
+Jev is paid and requires a key. Get one at
+[console.typesafe.ai/keys](https://console.typesafe.ai/keys) and put it in
+`.env` (never committed):
 
 ```bash
-make help    # todos os alvos
-make check   # o mesmo que o CI roda: tipos, testes, build
+TYPESAFE_API_KEY=your_key_here
 ```
 
-Os testes não gastam tokens: as chamadas ao Jev são mockadas. Para uma
-verificação ao vivo contra a API real:
+Without a key, jevdedup works the same, but with classic checks only and a
+warning.
+
+## Development
+
+```bash
+make help    # all targets
+make check   # what CI runs: types, tests, build
+```
+
+Tests do not spend tokens: Jev calls are mocked. For a live check against the
+real API:
 
 ```bash
 JEV_LIVE=1 bun test test/jev.live.test.ts
 ```
 
-Contribuições são bem-vindas, veja [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Licença
+## License
 
 [MIT](LICENSE)

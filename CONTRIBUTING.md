@@ -1,26 +1,26 @@
-# Contribuindo
+# Contributing
 
-Obrigado por olhar o projeto. Lembre que o jevdedup é um exercício para testar o
-Jev (TypeSafe AI), então mudanças que exploram melhor o SDK são especialmente
-bem-vindas.
+Thanks for looking at the project. Remember that jevdedup is an exercise to
+test Jev (TypeSafe AI), so changes that explore the SDK better are especially
+welcome.
 
-## Antes de abrir um PR
+## Before opening a PR
 
 ```bash
 make check
 ```
 
-É exatamente o que o CI roda: checagem de tipos, testes e build.
+It is exactly what CI runs: type checking, tests and build.
 
-## Regras de casa
+## House rules
 
-- Teste nasce junto com o código. Caminho feliz sozinho não conta: cubra
-  entrada inválida, arquivo inacessível, falha de rede e casos de borda.
-- Nunca ajuste um teste só para ele passar. Teste falhando quer dizer que o
-  código está errado até prova em contrário, e a prova vai no commit.
-- Nada de chave de API, token ou dado pessoal no repositório. Use `.env`.
-- O CLI nunca deleta arquivo do usuário. Relatório é relatório.
+- Tests are born with the code. Happy path alone does not count: cover invalid
+  input, inaccessible files, network failures and edge cases.
+- Never tweak a test just to make it pass. A failing test means the code is
+  wrong until proven otherwise, and the proof goes in the commit.
+- No API keys, tokens or personal data in the repository. Use `.env`.
+- The CLI never deletes the user's files. Report is report.
 
-## Bugs e ideias
+## Bugs and ideas
 
-Abra uma issue com o comando que você rodou, a saída e o que esperava.
+Open an issue with the command you ran, the output and what you expected.
