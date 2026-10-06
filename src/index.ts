@@ -6,6 +6,7 @@ export { scanFiles, type ScanOptions } from "./scanner.ts";
 export {
   findExactDuplicates,
   findSemanticPairs,
+  similarSize,
   type ExactDuplicateResult,
   type FindOptions,
 } from "./duplicates.ts";
@@ -13,6 +14,7 @@ export { quickHash, fullHash } from "./hasher.ts";
 export { isProbablyText, readExcerpt } from "./excerpt.ts";
 export {
   JevVerifier,
+  pairHasText,
   type JevClient,
   type JevVerifierOptions,
 } from "./jev.ts";

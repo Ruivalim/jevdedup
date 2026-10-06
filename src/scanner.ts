@@ -8,8 +8,13 @@ export interface ScanOptions {
    * Matching files and directories are skipped.
    */
   exclude?: string[];
-  /** Skip the `.git` directory. Default: true. */
+  /** Skip `.git` directories at any depth. Default: true. */
   skipGit?: boolean;
+  /**
+   * Skip files and directories whose name starts with a dot, which also drops
+   * `.DS_Store` and AppleDouble `._*` files. Default: true.
+   */
+  skipHidden?: boolean;
   /** Ignore files smaller than this many bytes. Default: 1 (any file). */
   minSize?: number;
 }
@@ -28,6 +33,7 @@ export async function scanFiles(
 ): Promise<FileEntry[]> {
   const exclude = (options.exclude ?? []).map((pattern) => new Bun.Glob(pattern));
   const skipGit = options.skipGit ?? true;
+  const skipHidden = options.skipHidden ?? true;
   const minSize = options.minSize ?? DEFAULT_MIN_SIZE;
   const files: FileEntry[] = [];
   const pending: string[] = [root];
@@ -41,7 +47,9 @@ export async function scanFiles(
       const path = join(dir, entry.name);
       const rel = relative(root, path);
 
-      if (isExcluded(exclude, rel, entry.name, skipGit)) continue;
+      if (skipGit && entry.name === ".git") continue;
+      if (skipHidden && entry.name.startsWith(".")) continue;
+      if (isExcluded(exclude, rel, entry.name)) continue;
 
       if (entry.isSymbolicLink()) continue;
 
@@ -68,11 +76,7 @@ function isExcluded(
   exclude: Bun.Glob[],
   relativePath: string,
   name: string,
-  skipGit: boolean,
 ): boolean {
-  if (skipGit && (relativePath === ".git" || relativePath.startsWith(".git/"))) {
-    return true;
-  }
   return exclude.some(
     (glob) => glob.match(relativePath) || glob.match(name),
   );

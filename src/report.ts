@@ -89,7 +89,9 @@ export function renderHuman(report: ScanReport): string {
       const reason = color.dim(`[${pair.reason}]`);
       const verdict = pair.verdict;
       const suffix =
-        verdict === undefined
+        pair.jevSkipped === "binary"
+          ? color.dim(" jev: skipped (binary, no text to compare)")
+          : verdict === undefined
           ? color.dim(" jev: not reviewed")
           : verdict.error !== undefined
             ? color.red(` jev error: ${verdict.error}`)

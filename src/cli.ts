@@ -4,7 +4,7 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { mapLimit } from "./concurrency.ts";
 import { findExactDuplicates, findSemanticPairs } from "./duplicates.ts";
-import { JevVerifier } from "./jev.ts";
+import { JevVerifier, pairHasText } from "./jev.ts";
 import { color, formatBytes, renderHuman, renderJson } from "./report.ts";
 import { scanFiles } from "./scanner.ts";
 import type { ScanReport } from "./types.ts";
@@ -20,7 +20,10 @@ ${color.bold("options")}
   --require-jev           fail when no API key is available
   --no-semantic           skip near-duplicate pairs (same name, or near-identical bytes)
   --min-size <size>       ignore files smaller than this (1KB, 5MB, plain bytes)
-  --exclude <glob>        skip paths matching the glob (repeatable)
+  --ignore <globs>        skip paths matching any glob; separate several with |
+                          (".DS_Store|*Thumbs.db"), repeatable; --exclude is an alias
+  --no-ignore-hidden      also scan dotfiles and dot-directories (skipped by default)
+  --no-ignore-git         also scan .git directories (skipped by default)
   --model <name>          Jev model (default: jev-latest)
   --concurrency <n>       parallel hashing jobs and Jev calls (default: 8 and 4)
   --max-jev-calls <n>     Jev call budget for one run (default: 50)
@@ -50,7 +53,10 @@ async function main(argv: string[]): Promise<number> {
       "require-jev": { type: "boolean" },
       "no-semantic": { type: "boolean" },
       "min-size": { type: "string" },
+      ignore: { type: "string", multiple: true },
       exclude: { type: "string", multiple: true },
+      "no-ignore-hidden": { type: "boolean" },
+      "no-ignore-git": { type: "boolean" },
       model: { type: "string" },
       concurrency: { type: "string" },
       "max-jev-calls": { type: "string" },
@@ -116,7 +122,9 @@ async function main(argv: string[]): Promise<number> {
 
   console.error(`scanning ${root} ...`);
   const files = await scanFiles(root, {
-    exclude: values.exclude ?? [],
+    exclude: parseIgnore([...(values.ignore ?? []), ...(values.exclude ?? [])]),
+    skipHidden: !values["no-ignore-hidden"],
+    skipGit: !values["no-ignore-git"],
     minSize: minSize ?? 1,
   });
   const bytesScanned = files.reduce((sum, file) => sum + file.size, 0);
@@ -181,12 +189,27 @@ async function applyJev(
     options.model !== undefined ? { model: options.model, budget: options.budget } : { budget: options.budget },
   );
 
+  // Binary pairs are dropped before the budget is split, so they never take a
+  // slot that a comparable pair could use.
+  const comparable: ScanReport["pairs"] = [];
+  await mapLimit(report.pairs, options.jevConcurrency, async (pair) => {
+    // An unreadable file (deleted mid-run, permissions) stays comparable, so
+    // comparePair records the read error on that pair instead of aborting the run.
+    if (await pairHasText(pair).catch(() => true)) {
+      comparable.push(pair);
+    } else {
+      pair.jevSkipped = "binary";
+    }
+  });
+  // mapLimit finishes out of order; keep the report's pair order for the budget cut.
+  comparable.sort((a, b) => report.pairs.indexOf(a) - report.pairs.indexOf(b));
+
   // The budget is allocated before any call goes out, so the cap is exact even
   // with concurrent requests.
   const groupSlice = report.groups.slice(0, options.budget);
-  const pairSlice = report.pairs.slice(0, Math.max(0, options.budget - groupSlice.length));
+  const pairSlice = comparable.slice(0, Math.max(0, options.budget - groupSlice.length));
   report.jev.truncated =
-    groupSlice.length < report.groups.length || pairSlice.length < report.pairs.length;
+    groupSlice.length < report.groups.length || pairSlice.length < comparable.length;
 
   await mapLimit(groupSlice, options.jevConcurrency, async (group) => {
     group.verdict = await verifier.verifyGroup(group);
@@ -217,6 +240,14 @@ function parseSize(value: string | undefined): number | Error | undefined {
   const factor = { b: 1, k: 1024, kb: 1024, m: 1024 ** 2, mb: 1024 ** 2, g: 1024 ** 3, gb: 1024 ** 3 }[unit];
   if (factor === undefined) return new Error(`unknown unit "${unit}"`);
   return Math.floor(amount * factor);
+}
+
+/** Split `a|b` lists into single globs, dropping empty entries like `a||b`. */
+function parseIgnore(values: string[]): string[] {
+  return values
+    .flatMap((value) => value.split("|"))
+    .map((pattern) => pattern.trim())
+    .filter((pattern) => pattern !== "");
 }
 
 function parsePositiveInt(value: string | undefined, fallback: number): number | Error {

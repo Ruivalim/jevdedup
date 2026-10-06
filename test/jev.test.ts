@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Questions, SystemOneRequest, SystemOneResult } from "@typesafe-ai/sdk";
-import { JevVerifier, type JevClient } from "../src/jev.ts";
+import { JevVerifier, pairHasText, type JevClient } from "../src/jev.ts";
 import type { DuplicateGroup, HashedFile, PairCandidate } from "../src/types.ts";
 import { makeFixture } from "./helpers.ts";
 
@@ -227,5 +227,46 @@ describe("JevVerifier budget", () => {
     expect(verifier.exhausted).toBe(true);
     expect(verifier.calls).toBe(1);
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("pairHasText", () => {
+  async function pairOf(a: string | Uint8Array, b: string | Uint8Array): Promise<PairCandidate> {
+    const f = await fixture();
+    const pathA = await f.write("x/file", a);
+    const pathB = await f.write("y/file", b);
+    const entry = (path: string, relativePath: string): HashedFile => ({
+      path,
+      relativePath,
+      size: 0,
+      hash: "",
+    });
+    return { a: entry(pathA, "x/file"), b: entry(pathB, "y/file"), reason: "same-name" };
+  }
+
+  test("true when both sides are text", async () => {
+    expect(await pairHasText(await pairOf("alpha", "beta"))).toBe(true);
+  });
+
+  test("false when both sides are binary", async () => {
+    expect(await pairHasText(await pairOf(new Uint8Array([0, 1, 2]), new Uint8Array([0, 3])))).toBe(false);
+  });
+
+  test("false when only one side is binary", async () => {
+    expect(await pairHasText(await pairOf("plain text", new Uint8Array([80, 0, 75])))).toBe(false);
+  });
+
+  test("invalid UTF-8 without NUL bytes counts as binary", async () => {
+    expect(await pairHasText(await pairOf("ok", new Uint8Array([0xff, 0xfe, 0xfd])))).toBe(false);
+  });
+
+  test("empty files count as text", async () => {
+    expect(await pairHasText(await pairOf("", ""))).toBe(true);
+  });
+
+  test("a file that vanished rejects instead of passing as text", async () => {
+    const pair = await pairOf("alpha", "beta");
+    pair.b.path = `${pair.b.path}.gone`;
+    await expect(pairHasText(pair)).rejects.toThrow();
   });
 });

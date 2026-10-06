@@ -104,6 +104,62 @@ describe("cli", () => {
     expect(report.stats.filesScanned).toBe(1);
   });
 
+  test("--ignore takes several globs separated by |", async () => {
+    const f = await fixture();
+    await f.write("a/Thumbs.db", "windows junk");
+    await f.write("b/old-Thumbs.db", "windows junk");
+    await f.write("a/desktop.ini", "ini");
+    await f.write("a/photo.jpg", "photo");
+
+    const { exitCode, stdout } = runCli([
+      f.root, "--json", "--no-jev", "--ignore", "*Thumbs.db|desktop.ini",
+    ]);
+    expect(exitCode).toBe(0);
+    const report = JSON.parse(stdout) as ScanReport;
+    expect(report.stats.filesScanned).toBe(1);
+  });
+
+  test("--ignore is repeatable, tolerates empty entries and mixes with --exclude", async () => {
+    const f = await fixture();
+    await f.write("a.log", "x");
+    await f.write("b.tmp", "x");
+    await f.write("c.bak", "x");
+    await f.write("keep.txt", "x");
+
+    const { exitCode, stdout } = runCli([
+      f.root, "--json", "--no-jev",
+      "--ignore", "*.log||",
+      "--ignore", " *.tmp ",
+      "--exclude", "*.bak",
+    ]);
+    expect(exitCode).toBe(0);
+    const report = JSON.parse(stdout) as ScanReport;
+    expect(report.stats.filesScanned).toBe(1);
+  });
+
+  test("--ignore with only separators ignores nothing", async () => {
+    const f = await fixture();
+    await f.write("keep.txt", "x");
+
+    const { stdout } = runCli([f.root, "--json", "--no-jev", "--ignore", "|"]);
+    expect((JSON.parse(stdout) as ScanReport).stats.filesScanned).toBe(1);
+  });
+
+  test("hidden files and .git are skipped unless asked for", async () => {
+    const f = await fixture();
+    await f.write(".DS_Store", "mac junk");
+    await f.write("repo/.git/HEAD", "ref: main");
+    await f.write("repo/src.ts", "x");
+
+    const scanned = (...flags: string[]) =>
+      (JSON.parse(runCli([f.root, "--json", "--no-jev", ...flags]).stdout) as ScanReport)
+        .stats.filesScanned;
+
+    expect(scanned()).toBe(1);
+    expect(scanned("--no-ignore-hidden")).toBe(2);
+    expect(scanned("--no-ignore-hidden", "--no-ignore-git")).toBe(3);
+  });
+
   test("--min-size accepts human sizes and rejects nonsense", async () => {
     const f = await fixture();
     await f.write("small.txt", "a");
@@ -136,5 +192,69 @@ describe("cli", () => {
     const { exitCode, stdout } = runCli(["--version"]);
     expect(exitCode).toBe(0);
     expect(stdout.trim()).toBe(pkg.version);
+  });
+
+  test("binary pairs skip Jev and leave the call budget to text pairs", async () => {
+    const f = await fixture();
+    // Same name, similar size, binary: listed, but Jev would only see name and size.
+    await f.write("a/Base.stl", new Uint8Array(4000).fill(0));
+    await f.write("b/Base.stl", new Uint8Array(4100).fill(0).map((_, i) => i % 7));
+    // Same name, text: worth the one call the budget allows.
+    await f.write("a/notes.md", "first draft of the notes");
+    await f.write("b/notes.md", "second draft of the notes, edited");
+
+    const requests: unknown[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        requests.push(await req.json());
+        return Response.json({
+          model: "jev-fake",
+          answers: {
+            same_content: { type: "noul", noul: 0.9 },
+            relation: {
+              type: "choice",
+              choice: "same_with_minor_edits",
+              confidence: 0.8,
+              probabilities: {},
+            },
+          },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+
+    try {
+      const proc = Bun.spawn(
+        [process.execPath, cliPath, f.root, "--json", "--max-jev-calls", "1"],
+        {
+          cwd: projectRoot,
+          env: {
+            ...process.env,
+            TYPESAFE_API_KEY: "test-key",
+            TYPESAFE_BASE_URL: server.url.origin,
+          },
+          stdout: "pipe",
+          stderr: "pipe",
+        },
+      );
+      const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+      expect(exitCode).toBe(0);
+
+      const report = JSON.parse(stdout) as ScanReport;
+      const stl = report.pairs.find((pair) => pair.a.relativePath.endsWith("Base.stl"));
+      const md = report.pairs.find((pair) => pair.a.relativePath.endsWith("notes.md"));
+
+      expect(report.pairs).toHaveLength(2);
+      expect(stl?.jevSkipped).toBe("binary");
+      expect(stl?.verdict).toBeUndefined();
+      expect(md?.jevSkipped).toBeUndefined();
+      expect(md?.verdict?.relation).toBe("same_with_minor_edits");
+      expect(requests).toHaveLength(1);
+      expect(report.jev.calls).toBe(1);
+      expect(report.jev.truncated).toBe(false);
+    } finally {
+      server.stop(true);
+    }
   });
 });

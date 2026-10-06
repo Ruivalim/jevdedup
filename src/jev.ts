@@ -222,6 +222,16 @@ export class JevVerifier {
   }
 }
 
+/**
+ * True when both files of a pair have a text excerpt. A binary file reaches Jev
+ * as name, size and hash only, which can not tell two versions of the same
+ * content from two unrelated files, so such pairs are not worth a call.
+ */
+export async function pairHasText(pair: PairCandidate): Promise<boolean> {
+  const [a, b] = await Promise.all([readExcerpt(pair.a.path), readExcerpt(pair.b.path)]);
+  return a !== null && b !== null;
+}
+
 function keepLabelToPath(
   label: string,
   files: Array<{ label: string; path: string }>,

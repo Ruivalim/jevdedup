@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { findExactDuplicates, findSemanticPairs } from "../src/duplicates.ts";
+import {
+  findExactDuplicates,
+  findSemanticPairs,
+  MAX_SIZE_RATIO,
+  SIZE_SLACK_BYTES,
+  similarSize,
+} from "../src/duplicates.ts";
 import { makeFixture } from "./helpers.ts";
 
 const fixtures: Array<() => Promise<void>> = [];
@@ -134,5 +140,92 @@ describe("findSemanticPairs", () => {
 
     expect(pairs).toHaveLength(2);
     expect(pairs.every((pair) => pair.a.relativePath === "x/doc.txt")).toBe(true);
+  });
+
+  test("same-name files of very different size are not paired", async () => {
+    // The real report that motivated the size bands: two unrelated Base.stl models.
+    const f = await fixture();
+    await f.write("Drybox/Base.stl", new Uint8Array(200_898).fill(1));
+    await f.write("models-downloaded-orca/Base.stl", new Uint8Array(17_558).fill(2));
+
+    const files = await (await import("../src/scanner.ts")).scanFiles(f.root);
+    const pairs = await findSemanticPairs(files, new Map(), new Map());
+    expect(pairs).toEqual([]);
+  });
+
+  test("an outlier size does not keep the similar same-name files apart", async () => {
+    const f = await fixture();
+    await f.write("big/Base.stl", new Uint8Array(200_000).fill(1));
+    await f.write("v1/Base.stl", new Uint8Array(17_000).fill(2));
+    await f.write("v2/Base.stl", new Uint8Array(18_000).fill(3));
+
+    const files = await (await import("../src/scanner.ts")).scanFiles(f.root);
+    const pairs = await findSemanticPairs(files, new Map(), new Map());
+
+    expect(pairs).toHaveLength(1);
+    const paths = [pairs[0]!.a.relativePath, pairs[0]!.b.relativePath].sort();
+    expect(paths).toEqual(["v1/Base.stl", "v2/Base.stl"]);
+  });
+
+  test("same-name matching ignores case and still applies the size band", async () => {
+    const f = await fixture();
+    await f.write("x/README.md", "a".repeat(5000));
+    await f.write("y/readme.md", "b".repeat(6000));
+    await f.write("z/Readme.md", "c".repeat(50_000));
+
+    const files = await (await import("../src/scanner.ts")).scanFiles(f.root);
+    const pairs = await findSemanticPairs(files, new Map(), new Map());
+
+    expect(pairs).toHaveLength(1);
+    expect(pairs.some((pair) => pair.b.relativePath === "z/Readme.md")).toBe(false);
+  });
+
+  test("bands chain from the smallest file, not from each neighbour", async () => {
+    // 10k, 19k, 37k: each step is under 2x, but 37k is over 2x the smallest.
+    const f = await fixture();
+    await f.write("a/log.txt", "a".repeat(10_000));
+    await f.write("b/log.txt", "b".repeat(19_000));
+    await f.write("c/log.txt", "c".repeat(37_000));
+
+    const files = await (await import("../src/scanner.ts")).scanFiles(f.root);
+    const pairs = await findSemanticPairs(files, new Map(), new Map());
+
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]?.a.relativePath).toBe("a/log.txt");
+    expect(pairs[0]?.b.relativePath).toBe("b/log.txt");
+  });
+
+  test("dropped same-name files are not hashed", async () => {
+    const f = await fixture();
+    await f.write("x/Base.stl", new Uint8Array(100_000).fill(1));
+    await f.write("y/Base.stl", new Uint8Array(5_000).fill(2));
+
+    const files = await (await import("../src/scanner.ts")).scanFiles(f.root);
+    const hashes = new Map<string, string>();
+    await findSemanticPairs(files, hashes, new Map());
+    expect(hashes.size).toBe(0);
+  });
+});
+
+describe("similarSize", () => {
+  test("ratio limit is inclusive", () => {
+    expect(similarSize(10_000, 10_000 * MAX_SIZE_RATIO)).toBe(true);
+    expect(similarSize(10_000, 10_000 * MAX_SIZE_RATIO + 1)).toBe(false);
+  });
+
+  test("small files within the byte slack match even past the ratio", () => {
+    expect(similarSize(1, 1 + SIZE_SLACK_BYTES)).toBe(true);
+    expect(similarSize(1, 2 + SIZE_SLACK_BYTES)).toBe(false);
+  });
+
+  test("an empty file only matches files within the slack", () => {
+    expect(similarSize(0, SIZE_SLACK_BYTES)).toBe(true);
+    expect(similarSize(0, SIZE_SLACK_BYTES + 1)).toBe(false);
+  });
+
+  test("argument order does not matter", () => {
+    expect(similarSize(175_584, 2_008_984)).toBe(false);
+    expect(similarSize(2_008_984, 175_584)).toBe(false);
+    expect(similarSize(30_000, 20_000)).toBe(true);
   });
 });

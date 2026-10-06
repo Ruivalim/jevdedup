@@ -76,6 +76,11 @@ export async function findExactDuplicates(
   return { groups, sizeCandidates, hashes, quickHashes };
 }
 
+/** Same-name files only pair when the larger is at most this many times the smaller... */
+export const MAX_SIZE_RATIO = 2;
+/** ...or when they differ by at most this many bytes, so tiny edited files still pair. */
+export const SIZE_SLACK_BYTES = 1024;
+
 /**
  * Pairs worth asking Jev about: files that a byte comparison can not call
  * duplicates, but a human might.
@@ -83,6 +88,10 @@ export async function findExactDuplicates(
  * Two signals: same file name with different content, and near-identical bytes
  * (same quick hash) with a differing full hash. Each group pairs its first file
  * against the others, so the pair count stays linear.
+ *
+ * A shared name alone says little (`Base.stl`, `index.html`), so same-name
+ * files are split into bands of similar size first; a 2 MB and a 170 KB file
+ * with the same name are different files, not an edit of one another.
  */
 export async function findSemanticPairs(
   files: readonly FileEntry[],
@@ -94,7 +103,9 @@ export async function findSemanticPairs(
   const seen = new Set<string>();
 
   const byName = groupBy(files, (file) => baseName(file.relativePath).toLowerCase());
-  const nameGroups = [...byName.values()].filter((group) => group.length >= 2);
+  const nameGroups = [...byName.values()]
+    .flatMap(splitBySimilarSize)
+    .filter((group) => group.length >= 2);
   const missing = nameGroups
     .flat()
     .filter((file) => !hashes.has(file.path));
@@ -157,6 +168,31 @@ function toDuplicateGroup(files: HashedFile[]): DuplicateGroup {
     size: sorted[0]!.size,
     files: sorted,
   };
+}
+
+/** True when two sizes are close enough for the files to be versions of each other. */
+export function similarSize(a: number, b: number): boolean {
+  const small = Math.min(a, b);
+  const large = Math.max(a, b);
+  return large - small <= SIZE_SLACK_BYTES || large <= small * MAX_SIZE_RATIO;
+}
+
+/**
+ * Sort by size and cut a new band whenever a file is no longer similar to the
+ * smallest file of the current band. Equal sizes keep their scan order.
+ */
+function splitBySimilarSize(group: FileEntry[]): FileEntry[][] {
+  const sorted = [...group].sort((a, b) => a.size - b.size);
+  const bands: FileEntry[][] = [];
+  for (const file of sorted) {
+    const band = bands.at(-1);
+    if (band !== undefined && similarSize(band[0]!.size, file.size)) {
+      band.push(file);
+    } else {
+      bands.push([file]);
+    }
+  }
+  return bands;
 }
 
 function baseName(relativePath: string): string {

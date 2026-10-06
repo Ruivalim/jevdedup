@@ -17,7 +17,8 @@ Nothing is deleted. jevdedup only generates reports.
 
 ## What it does
 
-1. **Scan** the folder recursively (symlinks are ignored, `.git` is skipped).
+1. **Scan** the folder recursively. Symlinks are ignored, and so are hidden
+   files (`.DS_Store`, `._*`) and `.git` directories unless you ask for them.
 2. **Group by size**: files of different sizes are never duplicates.
 3. **Quick hash**: first and last 64 KB plus size, to drop the obvious ones.
 4. **Full SHA-256** only on the survivors: groups with equal hashes are exact
@@ -27,7 +28,9 @@ Nothing is deleted. jevdedup only generates reports.
    copy is worth keeping?
 6. **Semantic pairs**: same file name with different bytes, or nearly identical
    bytes with different hashes, go to Jev to decide whether they are the same
-   content with small edits.
+   content with small edits. A shared name only counts when the sizes are close
+   (the larger at most 2x the smaller, or within 1 KB), since `Base.stl` at
+   2 MB and `Base.stl` at 170 KB are different files.
 
 ## Installation
 
@@ -48,7 +51,7 @@ build a standalone binary with `make build` (output goes to `dist/jevdedup`).
 
 ```bash
 jevdedup ~/Downloads                    # report with Jev's verdict
-jevdedup ~/Fotos --min-size 1MB --exclude "raw/**"
+jevdedup ~/Fotos --min-size 1MB --ignore "raw/**|*Thumbs.db"
 jevdedup . --json > report.json         # machine-readable output
 jevdedup . --no-jev                     # offline, classic checks only
 jevdedup . --fail-on-duplicates         # exit code 2 if anything is found (CI)
@@ -63,7 +66,9 @@ jevdedup . --fail-on-duplicates         # exit code 2 if anything is found (CI)
 | `--require-jev` | fails if `TYPESAFE_API_KEY` is missing instead of degrading |
 | `--no-semantic` | skips semantic pairs, exact duplicates only |
 | `--min-size <size>` | ignores smaller files (`1KB`, `5MB`, or plain bytes) |
-| `--exclude <glob>` | skips paths matching the glob (repeatable) |
+| `--ignore <globs>` | skips paths matching any glob; separate several with `\|`, repeatable (`--exclude` is an alias) |
+| `--no-ignore-hidden` | also scans dotfiles and dot-directories, skipped by default |
+| `--no-ignore-git` | also scans `.git` directories, skipped by default |
 | `--model <name>` | the Jev model (default `jev-latest`) |
 | `--concurrency <n>` | parallelism for hashing and for calls (default 8 and 4) |
 | `--max-jev-calls <n>` | budget of Jev calls per run (default 50) |
@@ -87,6 +92,11 @@ Semantic pairs get two questions: `same_content` (`noul`) and `relation`
 shows the answer and the raw numbers (probability, confidence, token usage),
 because Jev is probabilistic and sometimes contradicts itself: the final
 decision is yours.
+
+Pairs where either file is binary stay in the report but are not sent to Jev
+(`"jevSkipped": "binary"` in the JSON): without a text excerpt it would only see
+names and sizes, and the call would be a guess. They do not use up the call
+budget either.
 
 ## The API key
 

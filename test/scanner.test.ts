@@ -37,13 +37,13 @@ describe("scanFiles", () => {
     expect(files.map((file) => file.relativePath)).toEqual(["real.txt"]);
   });
 
-  test("skips .git but keeps other hidden files", async () => {
+  test("skips .git but keeps other hidden files when hidden files are allowed", async () => {
     const f = await fixture();
     await f.write(".git/config", "gitdata");
     await f.write(".hidden", "dotfile");
     await f.write("plain.txt", "x");
 
-    const files = await scanFiles(f.root);
+    const files = await scanFiles(f.root, { skipHidden: false });
     expect(files.map((file) => file.relativePath)).toEqual([".hidden", "plain.txt"]);
   });
 
@@ -73,5 +73,67 @@ describe("scanFiles", () => {
     await f.write("file.txt", "x");
     const files = await scanFiles(f.root, { exclude: ["**/*.nope"] });
     expect(files).toHaveLength(1);
+  });
+
+  test("skips hidden files and hidden directories by default", async () => {
+    const f = await fixture();
+    await f.write(".DS_Store", "mac junk");
+    await f.write("a/.DS_Store", "mac junk");
+    await f.write("a/._photo.jpg", "AppleDouble fork");
+    await f.write(".cache/blob", "inside a hidden dir");
+    await f.write("a/photo.jpg", "real photo");
+
+    const files = await scanFiles(f.root);
+    expect(files.map((file) => file.relativePath)).toEqual(["a/photo.jpg"]);
+  });
+
+  test("names that only contain a dot are not hidden", async () => {
+    const f = await fixture();
+    await f.write("a/my.DS_Store", "kept");
+    await f.write("a/_x.txt", "kept");
+    await f.write("v1.2/notes.txt", "kept");
+
+    const files = await scanFiles(f.root);
+    expect(files.map((file) => file.relativePath)).toEqual([
+      "a/_x.txt",
+      "a/my.DS_Store",
+      "v1.2/notes.txt",
+    ]);
+  });
+
+  test("a hidden scan root is still scanned", async () => {
+    const f = await fixture();
+    await f.write(".config/app/settings.json", "{}");
+
+    const files = await scanFiles(`${f.root}/.config`);
+    expect(files.map((file) => file.relativePath)).toEqual(["app/settings.json"]);
+  });
+
+  test("nested .git directories are skipped, not only the top one", async () => {
+    const f = await fixture();
+    await f.write("repo-a/.git/HEAD", "ref: main");
+    await f.write("deep/repo-b/.git/objects/ab/cd", "blob");
+    await f.write("repo-a/src.ts", "x");
+
+    const files = await scanFiles(f.root, { skipHidden: false });
+    expect(files.map((file) => file.relativePath)).toEqual(["repo-a/src.ts"]);
+  });
+
+  test("skipGit: false scans .git when hidden files are allowed", async () => {
+    const f = await fixture();
+    await f.write("repo/.git/HEAD", "ref: main");
+    await f.write("repo/src.ts", "x");
+
+    const files = await scanFiles(f.root, { skipHidden: false, skipGit: false });
+    expect(files.map((file) => file.relativePath)).toEqual(["repo/.git/HEAD", "repo/src.ts"]);
+  });
+
+  test("skipGit: false alone still drops .git, because it is hidden", async () => {
+    const f = await fixture();
+    await f.write("repo/.git/HEAD", "ref: main");
+    await f.write("repo/src.ts", "x");
+
+    const files = await scanFiles(f.root, { skipGit: false });
+    expect(files.map((file) => file.relativePath)).toEqual(["repo/src.ts"]);
   });
 });

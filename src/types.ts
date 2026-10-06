@@ -84,7 +84,13 @@ export interface ScanReport {
     semanticPairs: number;
   };
   groups: Array<DuplicateGroup & { verdict?: GroupVerdict }>;
-  pairs: Array<PairCandidate & { verdict?: PairVerdict }>;
+  pairs: Array<
+    PairCandidate & {
+      verdict?: PairVerdict;
+      /** Why Jev was not asked about this pair, when it was left out on purpose. */
+      jevSkipped?: "binary";
+    }
+  >;
   jev: {
     enabled: boolean;
     calls: number;
