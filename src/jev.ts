@@ -30,6 +30,8 @@ export interface JevVerifierOptions {
   model?: string;
   /** Hard cap on `systemOne` calls for one run. Default: 50. */
   budget?: number;
+  /** API key for `fromEnvironment`; the SDK reads `TYPESAFE_API_KEY` when omitted. */
+  apiKey?: string;
 }
 
 const DEFAULT_BUDGET = 50;
@@ -73,7 +75,8 @@ export class JevVerifier {
 
   /** A real client reading `TYPESAFE_API_KEY` from the environment. */
   static fromEnvironment(options: JevVerifierOptions = {}): JevVerifier {
-    return new JevVerifier(new TypeSafeClient(), options);
+    const client = new TypeSafeClient(options.apiKey !== undefined ? { apiKey: options.apiKey } : {});
+    return new JevVerifier(client, options);
   }
 
   /** Judge one group of byte-identical files. */

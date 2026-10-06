@@ -18,6 +18,7 @@ export {
   type JevClient,
   type JevVerifierOptions,
 } from "./jev.ts";
+export { resolveApiKey, parseKeyFile, defaultKeyPath, type ResolvedApiKey } from "./apikey.ts";
 export { formatBytes, renderHuman, renderJson } from "./report.ts";
 export { mapLimit } from "./concurrency.ts";
 export type {

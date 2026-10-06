@@ -40,7 +40,7 @@ Requirements: [Bun](https://bun.com) 1.1 or newer.
 git clone https://github.com/Ruivalim/jevdedup.git
 cd jevdedup
 make setup                # bun install + creates .env from the example
-# edit .env and put your TYPESAFE_API_KEY there
+# put your key in ~/.config/jevdedup/api-key (see "The API key")
 make install              # bun link: installs the `jevdedup` command
 ```
 
@@ -69,6 +69,7 @@ jevdedup . --fail-on-duplicates         # exit code 2 if anything is found (CI)
 | `--ignore <globs>` | skips paths matching any glob; separate several with `\|`, repeatable (`--exclude` is an alias) |
 | `--no-ignore-hidden` | also scans dotfiles and dot-directories, skipped by default |
 | `--no-ignore-git` | also scans `.git` directories, skipped by default |
+| `--api-key-file <path>` | reads the TypeSafe key from this file |
 | `--model <name>` | the Jev model (default `jev-latest`) |
 | `--concurrency <n>` | parallelism for hashing and for calls (default 8 and 4) |
 | `--max-jev-calls <n>` | budget of Jev calls per run (default 50) |
@@ -101,12 +102,28 @@ budget either.
 ## The API key
 
 Jev is paid and requires a key. Get one at
-[console.typesafe.ai/keys](https://console.typesafe.ai/keys) and put it in
-`.env` (never committed):
+[console.typesafe.ai/keys](https://console.typesafe.ai/keys). For the installed
+command, keep it in a file only you can read:
 
 ```bash
-TYPESAFE_API_KEY=your_key_here
+mkdir -p ~/.config/jevdedup
+printf '%s\n' 'your_key_here' > ~/.config/jevdedup/api-key
+chmod 600 ~/.config/jevdedup/api-key
 ```
+
+Bun only loads `.env` from the directory you run the command in, so a key in
+the project's `.env` is not seen when you run `jevdedup ~/Downloads` from
+somewhere else. The key is looked up in this order, first match wins:
+
+1. `--api-key-file <path>`
+2. `TYPESAFE_API_KEY`, from the environment or a `.env` in the current directory
+3. `TYPESAFE_API_KEY_FILE`, a path to a file
+4. `~/.config/jevdedup/api-key` (or `$XDG_CONFIG_HOME/jevdedup/api-key`)
+
+A key file holds either the bare key or a `TYPESAFE_API_KEY=...` line, so
+pointing it at an existing `.env` works too. A file you name explicitly (1 or
+3) must exist and hold a key; the default file (4) is optional. jevdedup warns
+when a key file can be read by other users.
 
 Without a key, jevdedup works the same, but with classic checks only and a
 warning.

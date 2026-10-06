@@ -4,6 +4,7 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { mapLimit } from "./concurrency.ts";
 import { findExactDuplicates, findSemanticPairs } from "./duplicates.ts";
+import { resolveApiKey } from "./apikey.ts";
 import { JevVerifier, pairHasText } from "./jev.ts";
 import { color, formatBytes, renderHuman, renderJson } from "./report.ts";
 import { scanFiles } from "./scanner.ts";
@@ -24,6 +25,7 @@ ${color.bold("options")}
                           (".DS_Store|*Thumbs.db"), repeatable; --exclude is an alias
   --no-ignore-hidden      also scan dotfiles and dot-directories (skipped by default)
   --no-ignore-git         also scan .git directories (skipped by default)
+  --api-key-file <path>   read the TypeSafe key from this file
   --model <name>          Jev model (default: jev-latest)
   --concurrency <n>       parallel hashing jobs and Jev calls (default: 8 and 4)
   --max-jev-calls <n>     Jev call budget for one run (default: 50)
@@ -34,6 +36,8 @@ ${color.bold("options")}
 ${color.bold("environment")}
   TYPESAFE_API_KEY        TypeSafe AI key (https://console.typesafe.ai/keys)
                           read from the environment or a local .env file
+  TYPESAFE_API_KEY_FILE   file holding the key
+                          default: ~/.config/jevdedup/api-key
 
 ${color.bold("exit codes")}
   0  ran fine          1  error          2  duplicates found (--fail-on-duplicates)`;
@@ -58,6 +62,7 @@ async function main(argv: string[]): Promise<number> {
       "no-ignore-hidden": { type: "boolean" },
       "no-ignore-git": { type: "boolean" },
       model: { type: "string" },
+      "api-key-file": { type: "string" },
       concurrency: { type: "string" },
       "max-jev-calls": { type: "string" },
       "fail-on-duplicates": { type: "boolean" },
@@ -103,15 +108,28 @@ async function main(argv: string[]): Promise<number> {
   }
 
   const wantJev = !values["no-jev"];
-  const apiKey = (process.env.TYPESAFE_API_KEY ?? "").trim();
+  let apiKey: string | undefined;
+  if (wantJev) {
+    const resolved = await resolveApiKey({
+      ...(values["api-key-file"] !== undefined ? { flagPath: values["api-key-file"] } : {}),
+      env: process.env,
+    }).catch((error: Error) => error);
+    if (resolved instanceof Error) {
+      console.error(`error: ${resolved.message}`);
+      return EXIT_ERROR;
+    }
+    for (const warning of resolved.warnings) console.warn(`warning: ${warning}`);
+    apiKey = resolved.key;
+  }
   let jevEnabled = wantJev;
   let disabledReason: string | undefined;
 
-  if (wantJev && apiKey === "") {
+  if (wantJev && apiKey === undefined) {
     if (values["require-jev"]) {
       console.error(
-        "error: TYPESAFE_API_KEY is not set.\n" +
-          "Get a key at https://console.typesafe.ai/keys and put it in .env (see .env.example).",
+        "error: no TypeSafe API key found.\n" +
+          "Get one at https://console.typesafe.ai/keys and put it in ~/.config/jevdedup/api-key\n" +
+          "(or TYPESAFE_API_KEY, TYPESAFE_API_KEY_FILE, --api-key-file).",
       );
       return EXIT_ERROR;
     }
@@ -168,6 +186,7 @@ async function main(argv: string[]): Promise<number> {
   if (jevEnabled) {
     console.error(`asking Jev to review ${exact.groups.length} groups and ${pairs.length} pairs ...`);
     await applyJev(report, {
+      apiKey: apiKey!,
       model: values.model,
       budget: jevCalls,
       jevConcurrency: Math.min(4, concurrency),
@@ -183,11 +202,13 @@ async function main(argv: string[]): Promise<number> {
 
 async function applyJev(
   report: ScanReport,
-  options: { model?: string; budget: number; jevConcurrency: number },
+  options: { apiKey: string; model?: string; budget: number; jevConcurrency: number },
 ): Promise<void> {
-  const verifier = JevVerifier.fromEnvironment(
-    options.model !== undefined ? { model: options.model, budget: options.budget } : { budget: options.budget },
-  );
+  const verifier = JevVerifier.fromEnvironment({
+    apiKey: options.apiKey,
+    budget: options.budget,
+    ...(options.model !== undefined ? { model: options.model } : {}),
+  });
 
   // Binary pairs are dropped before the budget is split, so they never take a
   // slot that a comparable pair could use.

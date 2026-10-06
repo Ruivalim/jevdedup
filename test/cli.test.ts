@@ -18,10 +18,20 @@ async function fixture() {
   return f;
 }
 
+/**
+ * The user's real key sources must never leak into a test run: no key in the
+ * environment, no key file, and a config dir that holds nothing.
+ */
+const isolatedEnv = {
+  TYPESAFE_API_KEY: "",
+  TYPESAFE_API_KEY_FILE: "",
+  XDG_CONFIG_HOME: join(projectRoot, "test", "no-such-config-dir"),
+};
+
 function runCli(args: string[], env: Record<string, string> = {}) {
   const proc = Bun.spawnSync([process.execPath, cliPath, ...args], {
     cwd: projectRoot,
-    env: { ...process.env, TYPESAFE_API_KEY: "", ...env },
+    env: { ...process.env, ...isolatedEnv, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -231,6 +241,7 @@ describe("cli", () => {
           cwd: projectRoot,
           env: {
             ...process.env,
+            ...isolatedEnv,
             TYPESAFE_API_KEY: "test-key",
             TYPESAFE_BASE_URL: server.url.origin,
           },
@@ -256,5 +267,80 @@ describe("cli", () => {
     } finally {
       server.stop(true);
     }
+  });
+
+  test("the key can come from --api-key-file or the default config file", async () => {
+    const f = await fixture();
+    await f.write("a/notes.md", "first draft of the notes");
+    await f.write("b/notes.md", "second draft of the notes");
+    const keyPath = await f.write("secret/key", "ts_from_file\n");
+    const { chmod } = await import("node:fs/promises");
+    await chmod(keyPath, 0o600);
+    const configDir = join(f.root, "secret", "xdg");
+    const defaultKey = await f.write("secret/xdg/jevdedup/api-key", "ts_from_default");
+    await chmod(defaultKey, 0o600);
+
+    const seenKeys: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch: (req) => {
+        seenKeys.push(req.headers.get("authorization") ?? "");
+        return Response.json({
+          model: "jev-fake",
+          answers: {
+            same_content: { type: "noul", noul: 0.9 },
+            relation: { type: "choice", choice: "same_with_minor_edits", confidence: 0.8, probabilities: {} },
+          },
+          usage: { input_tokens: 1, output_tokens: 1 },
+        });
+      },
+    });
+
+    const run = async (args: string[], env: Record<string, string>) => {
+      const proc = Bun.spawn([process.execPath, cliPath, f.root, "--json", "--ignore", "secret/**", ...args], {
+        cwd: projectRoot,
+        env: { ...process.env, ...isolatedEnv, TYPESAFE_BASE_URL: server.url.origin, ...env },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      return { stdout, stderr, exitCode };
+    };
+
+    try {
+      const viaFlag = await run(["--api-key-file", keyPath], {});
+      expect(viaFlag.exitCode).toBe(0);
+      expect((JSON.parse(viaFlag.stdout) as ScanReport).jev.enabled).toBe(true);
+      expect(viaFlag.stderr).not.toContain("warning");
+
+      const viaDefault = await run([], { XDG_CONFIG_HOME: configDir });
+      expect(viaDefault.exitCode).toBe(0);
+      expect((JSON.parse(viaDefault.stdout) as ScanReport).jev.calls).toBe(1);
+
+      expect(seenKeys).toEqual(["Bearer ts_from_file", "Bearer ts_from_default"]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a missing --api-key-file is an error, not a silent fallback", async () => {
+    const f = await fixture();
+    await f.write("solo.txt", "unique");
+
+    const { exitCode, stderr } = runCli([f.root, "--api-key-file", join(f.root, "nope")]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("cannot read API key file");
+  });
+
+  test("--no-jev never looks at key files", async () => {
+    const f = await fixture();
+    await f.write("solo.txt", "unique");
+
+    const { exitCode } = runCli([f.root, "--no-jev", "--api-key-file", join(f.root, "nope")]);
+    expect(exitCode).toBe(0);
   });
 });
